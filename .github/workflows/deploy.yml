@@ -20,13 +20,24 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Step 3: Build and push Docker image
+      # Step 3: Extract metadata (tags, labels) for Docker
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo
+          tags: |
+            type=raw,value=latest
+            type=raw,value={{date 'YYYYMMDD-HHmmss'}}
+
+      # Step 4: Build and push Docker image
       - name: Build and push Docker image
         uses: docker/build-push-action@v4
         with:
           context: .
           push: true
-          tags: <your-dockerhub-username>/zomatodemo:latest
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
 
   deploy:
     runs-on: ubuntu-latest
@@ -39,7 +50,7 @@ jobs:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
       # Step 2: Deploy to host machine
-      - name: Deploy to host
+      - name: Deploy to host machine
         run: |
           ssh -o StrictHostKeyChecking=no icanio-10163@192.168.29.8 << 'EOF'
             # Stop and remove any existing container
@@ -47,8 +58,8 @@ jobs:
             docker rm zomatodemo || true
 
             # Pull the latest image
-            docker pull <your-dockerhub-username>/zomatodemo:latest
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo:latest
 
             # Run the new container
-            docker run -d --name zomatodemo -p 8080:80 <your-dockerhub-username>/zomatodemo:latest
+            docker run -d --name zomatodemo -p 8080:80 ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo:latest
           EOF
