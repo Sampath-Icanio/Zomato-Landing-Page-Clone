@@ -1,4 +1,4 @@
-name: Build and Deploy Zomato Clone
+name: Build and Deploy Zomato Clone Locally
 
 on:
   push:
@@ -32,34 +32,28 @@ jobs:
 
       # Step 4: Build and push Docker image
       - name: Build and push Docker image
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-
-  deploy:
-    runs-on: ubuntu-latest
-    needs: build-and-push
-    steps:
-      # Step 1: Set up SSH
-      - name: Set up SSH
-        uses: webfactory/ssh-agent@v0.5.4
-        with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-
-      # Step 2: Deploy to host machine
-      - name: Deploy to host machine
         run: |
-          ssh -o StrictHostKeyChecking=no icanio-10163@192.168.29.8 << 'EOF'
-            # Stop and remove any existing container
-            docker stop zomatodemo || true
-            docker rm zomatodemo || true
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo:latest .
+          docker tag ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo:latest ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo:$(date +"%Y%m%d-%H%M%S")
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo:latest
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo:$(date +"%Y%m%d-%H%M%S")
 
-            # Pull the latest image
-            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo:latest
+      # Step 5: Stop and backup the existing container
+      - name: Stop and backup existing container
+        run: |
+          docker rename zomatodemo zomatodemo_backup || true
+          docker stop zomatodemo_backup || true
 
-            # Run the new container
-            docker run -d --name zomatodemo -p 8080:80 ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo:latest
-          EOF
+      # Step 6: Run the new container
+      - name: Run new Docker container
+        run: |
+          docker run -d --name zomatodemo -p 8080:80 ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo:latest || {
+            echo "Deployment failed, rolling back...";
+            docker start zomatodemo_backup;
+            exit 1;
+          }
+
+      # Step 7: Cleanup backup container if deployment succeeds
+      - name: Cleanup backup container
+        run: |
+          docker rm zomatodemo_backup || true
