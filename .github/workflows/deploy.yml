@@ -20,40 +20,47 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Step 3: Extract metadata (tags, labels) for Docker
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v4
-        with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo
-          tags: |
-            type=raw,value=latest
-            type=raw,value={{date 'YYYYMMDD-HHmmss'}}
+      # Step 3: Extract timestamp for tagging
+      - name: Extract timestamp
+        run: echo "TIMESTAMP=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
 
       # Step 4: Build and push Docker image
       - name: Build and push Docker image
         run: |
           docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo:latest .
-          docker tag ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo:latest ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo:$(date +"%Y%m%d-%H%M%S")
+          docker tag ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo:latest ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo:$TIMESTAMP
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo:latest
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo:$(date +"%Y%m%d-%H%M%S")
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo:$TIMESTAMP
 
-      # Step 5: Stop and backup the existing container
-      - name: Stop and backup existing container
-        run: |
-          docker rename zomatodemo zomatodemo_backup || true
-          docker stop zomatodemo_backup || true
-
-      # Step 6: Run the new container
+      # Step 5: Run new container (without stopping old one)
       - name: Run new Docker container
         run: |
-          docker run -d --name zomatodemo -p 8080:80 ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo:latest || {
-            echo "Deployment failed, rolling back...";
-            docker start zomatodemo_backup;
-            exit 1;
-          }
+          docker network create zomatonet || true
+          docker run -d --name zomatodemo_new --network zomatonet -p 8081:80 ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo:latest
+          sleep 10  # Give it time to start
 
-      # Step 7: Cleanup backup container if deployment succeeds
-      - name: Cleanup backup container
+          # Check if the new container is running
+          if ! docker ps | grep -q zomatodemo_new; then
+            echo "New container failed to start. Rolling back..."
+            exit 1
+          fi
+
+      # Step 6: Swap new container into production
+      - name: Swap traffic to new container
         run: |
-          docker rm zomatodemo_backup || true
+          docker stop zomatodemo || true
+          docker rm zomatodemo || true
+          docker rename zomatodemo_new zomatodemo
+          docker network connect zomatonet zomatodemo
+
+      # Step 7: Cleanup old container if deployment succeeds
+      - name: Cleanup old container
+        run: |
+          docker rm -f zomatodemo_backup || true
+
+      # Step 8: Rollback if new container fails
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "Rolling back to previous version..."
+          docker start zomatodemo_backup || true
