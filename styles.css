@@ -13,7 +13,7 @@ body{
 /* Hero section */
 
 .hero__section{
-	background-image: url('./Images/demo1.png');
+	background-image: url('./Images/mobileBanner.png');
 	height: 400px;
 	background-size: cover;
 	background-position: center;
