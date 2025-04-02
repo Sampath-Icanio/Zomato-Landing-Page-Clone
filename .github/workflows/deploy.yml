@@ -29,7 +29,7 @@ jobs:
           tags: |
             type=raw,value=latest
             type=raw,value={{date 'YYYYMMDD-HHmmss'}}
-
+      
       # Step 4: Build and push Docker image
       - name: Build and push Docker image
         run: |
@@ -38,27 +38,32 @@ jobs:
           docker tag ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo:latest ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo:$TIMESTAMP
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo:latest
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo:$TIMESTAMP
-
-      # Step 5: Stop and backup the existing container safely
-      - name: Stop and backup existing container
+      
+      # Step 5: Backup the existing container before stopping
+      - name: Backup existing container before stopping
+        run: |
+          if docker ps -a --format '{{.Names}}' | grep -q "^zomatodemo$"; then
+            docker commit zomatodemo zomatodemo_backup || true
+          fi
+      
+      # Step 6: Stop and remove the existing container safely
+      - name: Stop and remove existing container
         run: |
           if docker ps -a --format '{{.Names}}' | grep -q "^zomatodemo$"; then
             docker stop zomatodemo || true
-            docker rename zomatodemo zomatodemo_backup || true
+            docker rm -f zomatodemo || true
           fi
-          docker rm -f zomatodemo_backup || true
-
-      # Step 6: Run the new container safely
+      
+      # Step 7: Run the new container safely
       - name: Run new Docker container
         run: |
           docker run -d --name zomatodemo -p 8080:80 ${{ secrets.DOCKERHUB_USERNAME }}/zomatodemo:latest || {
             echo "Deployment failed, rolling back...";
-            docker rename zomatodemo_backup zomatodemo || true;
-            docker start zomatodemo || true;
+            docker run -d --name zomatodemo -p 8080:80 zomatodemo_backup || true;
             exit 1;
           }
-
-      # Step 7: Cleanup backup container if deployment succeeds
+      
+      # Step 8: Cleanup backup container if deployment succeeds
       - name: Cleanup backup container
         run: |
-          docker rm -f zomatodemo_backup || true
+          docker rmi zomatodemo_backup || true
